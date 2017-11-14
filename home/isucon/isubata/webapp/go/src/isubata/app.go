@@ -641,6 +641,18 @@ func makeGzip(body []byte) ([]byte, error) {
 	return b.Bytes(), err
 }
 
+var (
+	fileNameMutex sync.Mutex
+	fileNameMutexId = 1
+)
+func fileName():string{
+	fileNameMutex.Lock()
+	var ret = fileNameMutexId
+	fileNameMutexId++
+	fileNameMutex.Unlock()
+	return strconv.Itoa(ret)
+}
+
 func postProfile(c echo.Context) error {
 	self, err := ensureLogin(c)
 	if self == nil {
@@ -678,7 +690,8 @@ func postProfile(c echo.Context) error {
 			return ErrBadReqeust
 		}
 
-		avatarName = fmt.Sprintf("%x%s", sha1.Sum(avatarData), ext)
+		//avatarName = fmt.Sprintf("%x%s", sha1.Sum(avatarData), ext)
+		avatarName = fmt.Sprintf("%x%s", fileName(), ext)
 	}
 
 	if avatarName != "" && len(avatarData) > 0 {
