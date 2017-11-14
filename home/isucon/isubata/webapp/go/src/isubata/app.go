@@ -690,7 +690,7 @@ func postProfile(c echo.Context) error {
 			return err
 		}
 		ioutil.WriteFile("/home/isucon/isubata/webapp/public/icons/"+avatarName+".gz", avatarDataGzip, os.ModePerm)
-		_, err = db.Exec("UPDATE user SET avatar_icon = ? WHERE id = ?", os.Getenv("ISUBATA_SERVER_ID/")+avatarName, self.ID)
+		_, err = db.Exec("UPDATE user SET avatar_icon = ? WHERE id = ?", os.Getenv("ISUBATA_SERVER_ID")+"/"+avatarName, self.ID)
 		if err != nil {
 			return err
 		}
