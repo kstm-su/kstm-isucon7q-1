@@ -125,10 +125,21 @@ type Message struct {
 	Content   string    `db:"content"`
 	CreatedAt time.Time `db:"created_at"`
 }
+type IMessage struct {
+	ID        int64     `db:"id"`
+	ChannelID int64     `db:"channel_id"`
+	UserID    int64     `db:"user_id"`
+	Content   string    `db:"content"`
+	CreatedAt time.Time `db:"created_at"`
 
-func queryMessages(chanID, lastID int64) ([]Message, error) {
-	msgs := []Message{}
-	err := db.Select(&msgs, "SELECT * FROM message WHERE id > ? AND channel_id = ? ORDER BY id DESC LIMIT 100",
+	Name        string `json:"name" db:"name"`
+	DisplayName string `json:"display_name" db:"display_name"`
+	AvatarIcon  string `json:"avatar_icon" db:"avatar_icon"`
+}
+
+func queryMessages(chanID, lastID int64) ([]IMessage, error) {
+	msgs := []IMessage{}
+	err := db.Select(&msgs, "SELECT m.*, name, display_name, avatar_icon FROM (SELECT * FROM message WHERE id > ? AND channel_id = ? ORDER BY id DESC LIMIT 100) as m INNER JOIN user ON user.id = m.user_id",
 		lastID, chanID)
 	return msgs, err
 }
@@ -356,7 +367,6 @@ func postMessage(c echo.Context) error {
 
 	return c.NoContent(204)
 }
-
 func jsonifyMessage(m Message) (map[string]interface{}, error) {
 	u := User{}
 	err := db.Get(&u, "SELECT name, display_name, avatar_icon FROM user WHERE id = ?",
@@ -368,6 +378,15 @@ func jsonifyMessage(m Message) (map[string]interface{}, error) {
 	r := make(map[string]interface{})
 	r["id"] = m.ID
 	r["user"] = u
+	r["date"] = m.CreatedAt.Format("2006/01/02 15:04:05")
+	r["content"] = m.Content
+	return r, nil
+}
+
+func myJsonifyMessage(m IMessage) (map[string]interface{}, error) {
+	r := make(map[string]interface{})
+	r["id"] = m.UserID
+	r["user"] = User{Name: m.Name, DisplayName: m.DisplayName, AvatarIcon: m.AvatarIcon}
 	r["date"] = m.CreatedAt.Format("2006/01/02 15:04:05")
 	r["content"] = m.Content
 	return r, nil
@@ -396,7 +415,7 @@ func getMessage(c echo.Context) error {
 	response := make([]map[string]interface{}, 0)
 	for i := len(messages) - 1; i >= 0; i-- {
 		m := messages[i]
-		r, err := jsonifyMessage(m)
+		r, err := myJsonifyMessage(m)
 		if err != nil {
 			return err
 		}
