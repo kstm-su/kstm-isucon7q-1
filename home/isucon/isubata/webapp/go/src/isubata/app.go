@@ -385,7 +385,7 @@ func jsonifyMessage(m Message) (map[string]interface{}, error) {
 
 func myJsonifyMessage(m IMessage) (map[string]interface{}, error) {
 	r := make(map[string]interface{})
-	r["id"] = m.UserID
+	r["id"] = m.ID
 	r["user"] = User{Name: m.Name, DisplayName: m.DisplayName, AvatarIcon: m.AvatarIcon}
 	r["date"] = m.CreatedAt.Format("2006/01/02 15:04:05")
 	r["content"] = m.Content
