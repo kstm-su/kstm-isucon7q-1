@@ -103,5 +103,7 @@ alias kataribe='/opt/kataribe -conf /opt/kataribe.toml'
 rotate() {
   kataribe < /var/log/nginx/access.log > /tmp/kataribe.log
   > /var/log/nginx/access.log
+  cat /var/log/syslog > /tmp/syslog
+  > /var/log/syslog
   ssh root@app3 /root/mysql/rotate.sh
 }
