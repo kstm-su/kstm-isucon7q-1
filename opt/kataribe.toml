@@ -61,6 +61,10 @@ regexp = '^GET /message\?.*'
 name = "GET /message"
 
 [[bundle]]
+regexp = '^POST /message'
+name = "POST /message"
+
+[[bundle]]
 regexp = '^GET /history/.*'
 name = "GET /history"
 
