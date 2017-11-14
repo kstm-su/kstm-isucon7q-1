@@ -58,13 +58,20 @@ name = "images"
 
 [[bundle]]
 regexp = '^GET /channel/.*'
-name = "channel"
+name = "GET /channel"
 
 [[bundle]]
 regexp = '^GET /profile/.*'
-name = "profile"
+name = "GET /profile"
 
 [[bundle]]
 regexp = '^GET /icons/.*'
-name = "icons"
+name = "GET /icons"
 
+[[bundle]]
+regexp = '^GET /message\?.*'
+name = "GET /message"
+
+[[bundle]]
+regexp = '^GET /history/.*'
+name = "GET /history"
