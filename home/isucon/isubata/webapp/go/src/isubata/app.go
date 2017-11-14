@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-redis/redis"
 	"github.com/go-sql-driver/mysql"
 	"github.com/gorilla/sessions"
 	"github.com/jmoiron/sqlx"
@@ -36,6 +37,7 @@ const (
 var (
 	db            *sqlx.DB
 	ErrBadReqeust = echo.NewHTTPError(http.StatusBadRequest)
+	redisClient   *redis.Client
 )
 
 type Renderer struct {
@@ -82,6 +84,10 @@ func init() {
 		time.Sleep(time.Second * 3)
 	}
 
+	redisClient = redis.NewClient(&redis.Options{
+		Addr: "app1",
+	})
+
 	db.SetMaxOpenConns(20)
 	db.SetConnMaxLifetime(5 * time.Minute)
 	log.Printf("Succeeded to connect db.")
@@ -108,6 +114,7 @@ func getUser(userID int64) (*User, error) {
 	return &u, nil
 }
 
+/*
 func addMessage(channelID, userID int64, content string) (int64, error) {
 	res, err := db.Exec(
 		"INSERT INTO message (channel_id, user_id, content, created_at) VALUES (?, ?, ?, NOW())",
@@ -116,6 +123,26 @@ func addMessage(channelID, userID int64, content string) (int64, error) {
 		return 0, err
 	}
 	return res.LastInsertId()
+}
+*/
+
+func addMessage(channelID, userID int64, content string) error {
+	res, err := db.Exec(
+		"INSERT INTO message (channel_id, user_id, content, created_at) VALUES (?, ?, ?, NOW())",
+		//channelID, userID, content)
+		channelID, userID, "")
+	if err != nil {
+		return err
+	}
+	lastInsertID, err := res.LastInsertId()
+	if err != nil {
+		return err
+	}
+	err = redisClient.Set(strconv.FormatInt(lastInsertID, 10), content, 0).Err()
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 type Message struct {
@@ -216,18 +243,6 @@ func register(name, password string) (int64, error) {
 }
 
 // request handlers
-
-func getInitialize(c echo.Context) error {
-	db.MustExec("DELETE FROM user WHERE id > 1000")
-	db.MustExec("DELETE FROM image WHERE id > 1001")
-	db.MustExec("DELETE FROM channel WHERE id > 10")
-	db.MustExec("DELETE FROM message WHERE id > 10000")
-	db.MustExec("DELETE FROM haveread")
-
-	os.Rename("/home/isucon/work", "/home/isucon/isubata/webapp/public/icons")
-
-	return c.String(204, "")
-}
 
 func getIndex(c echo.Context) error {
 	userID := sessUserID(c)
@@ -361,7 +376,7 @@ func postMessage(c echo.Context) error {
 		chanID = int64(x)
 	}
 
-	if _, err := addMessage(chanID, user.ID, message); err != nil {
+	if err := addMessage(chanID, user.ID, message); err != nil {
 		return err
 	}
 
@@ -379,7 +394,11 @@ func jsonifyMessage(m Message) (map[string]interface{}, error) {
 	r["id"] = m.ID
 	r["user"] = u
 	r["date"] = m.CreatedAt.Format("2006/01/02 15:04:05")
-	r["content"] = m.Content
+	content, err := redisClient.Get(strconv.FormatInt(m.ID, 10)).Result()
+	if err != nil {
+		return nil, err
+	}
+	r["content"] = content
 	return r, nil
 }
 
@@ -388,7 +407,12 @@ func myJsonifyMessage(m IMessage) (map[string]interface{}, error) {
 	r["id"] = m.ID
 	r["user"] = User{Name: m.Name, DisplayName: m.DisplayName, AvatarIcon: m.AvatarIcon}
 	r["date"] = m.CreatedAt.Format("2006/01/02 15:04:05")
-	r["content"] = m.Content
+	content, err := redisClient.Get(strconv.FormatInt(m.ID, 10)).Result()
+	if err != nil {
+		log.Printf("myJsonifyMessage:\n%+v\n", m, err)
+		return nil, err
+	}
+	r["content"] = content
 	return r, nil
 }
 
@@ -468,7 +492,7 @@ func fetchUnread(c echo.Context) error {
 		return c.NoContent(http.StatusForbidden)
 	}
 
-	time.Sleep(time.Second)
+	time.Sleep(time.Second * 1)
 
 	channels, err := queryChannels()
 	if err != nil {
