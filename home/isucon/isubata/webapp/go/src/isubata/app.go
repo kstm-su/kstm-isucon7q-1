@@ -85,7 +85,7 @@ func init() {
 	}
 
 	redisClient = redis.NewClient(&redis.Options{
-		Addr: "app1",
+		Addr: "app3:6379",
 	})
 
 	db.SetMaxOpenConns(20)
@@ -131,6 +131,8 @@ func addMessage(channelID, userID int64, content string) error {
 		"INSERT INTO message (channel_id, user_id, content, created_at) VALUES (?, ?, ?, NOW())",
 		//channelID, userID, content)
 		channelID, userID, "")
+	//"INSERT INTO message (channel_id, user_id, created_at) VALUES (?, ?, NOW())",
+	//channelID, userID)
 	if err != nil {
 		return err
 	}
