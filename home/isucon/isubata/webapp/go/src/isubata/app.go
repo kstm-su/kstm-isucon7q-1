@@ -105,6 +105,17 @@ type User struct {
 
 func getUser(userID int64) (*User, error) {
 	u := User{}
+	userGob, err:=redisClient.Get("u"+strconv.FormatInt(userID, 10)).Result()
+	if err!=nil{
+		return nil,err
+		}
+	dec:=gob.NewDecoder(&userGob)
+	err=dec.Decode(&u)
+	if err!=nil{
+	return nil,err
+	}
+	return &u, err
+	/*
 	if err := db.Get(&u, "SELECT * FROM user WHERE id = ?", userID); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -112,6 +123,7 @@ func getUser(userID int64) (*User, error) {
 		return nil, err
 	}
 	return &u, nil
+	*/
 }
 
 /*
@@ -127,6 +139,7 @@ func addMessage(channelID, userID int64, content string) (int64, error) {
 */
 
 func addMessage(channelID, userID int64, content string) error {
+	/*
 	res, err := db.Exec(
 		"INSERT INTO message (channel_id, user_id, content, created_at) VALUES (?, ?, ?, NOW())",
 		//channelID, userID, content)
@@ -144,6 +157,14 @@ func addMessage(channelID, userID int64, content string) error {
 	if err != nil {
 		return err
 	}
+	*/
+	var data bytes.Buffer
+	enc:=gob.NewEncoder(&data)
+	err:=enc.Encode(Message{ChannelID:channelID, UserID:userID, Content:content, CreatedAt:time.Now})
+	if err!=nil{
+		return err
+		}
+	redisClient.Lpush("c"+strconv.FormatInt(channel_id,10), data, 0)
 	return nil
 }
 
@@ -167,9 +188,37 @@ type IMessage struct {
 }
 
 func queryMessages(chanID, lastID int64) ([]IMessage, error) {
+	res, err:=redisClient.LRange("c"+strconv.FormatInt(chanID, 10), lastID, -1).Result()
+	if err !=nil{
+	return nil, err
+	}
 	msgs := []IMessage{}
+	for i,v:=range(res){
+		var one Message
+		doc:=gob.NewDecoder(&v)
+		err =doc.Decode(&one)
+		if err != nil{
+			return nil,err
+		}
+		userGob,err:=redisClient.Get("u"+strconv.FormatInt(one.UserID, 10)).Result()
+		if err != nil{
+			return nil,err
+		}
+		var user User
+		doc=gob.NewDecoder(&userGob)
+		err=doc.Decode(&user)
+		if err!=nil{
+		return nil,err
+		}
+		msgs=append(msgs, IMessage{ID:i+lastID, ChannelID:chanID, UserID: one.UserID,
+			Content:one.Content, CreatedAt:one.CreatedAt, Name:user.Name,
+			DisplayName:user.DisplayName, AvatarIcon:user.AvatarIcon,
+		}
+	}
+	/*
 	err := db.Select(&msgs, "SELECT m.*, name, display_name, avatar_icon FROM (SELECT * FROM message WHERE id > ? AND channel_id = ? ORDER BY id DESC LIMIT 100) as m INNER JOIN user ON user.id = m.user_id ORDER BY m.id DESC",
 		lastID, chanID)
+		*/
 	return msgs, err
 }
 
@@ -241,6 +290,20 @@ func register(name, password string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+/*
+	var userGob bytes.Buffer
+	enc:=gob.NewEncoder(&userGob)
+	err=enc.Encode(User{ID:res.LastInsertId(), Name: name, Salt:salt, Digest:digest, CreatedAt:time.Now(), DisplayName:name, AvatarIcon:"default.png"})
+
+	if err !=nil{
+	return 0,err
+	}
+	err = redisClient.Lpush("user", userGob).Err()
+	if err !=nil{
+	return 0,err
+	}
+	*/
+
 	return res.LastInsertId()
 }
 
