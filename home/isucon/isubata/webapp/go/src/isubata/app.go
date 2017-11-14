@@ -26,6 +26,7 @@ import (
 
 	"bytes"
 	"compress/gzip"
+	"sync"
 )
 
 const (
@@ -642,10 +643,11 @@ func makeGzip(body []byte) ([]byte, error) {
 }
 
 var (
-	fileNameMutex sync.Mutex
+	fileNameMutex   sync.Mutex
 	fileNameMutexId = 1
 )
-func fileName()string{
+
+func fileName() string {
 	fileNameMutex.Lock()
 	var ret = fileNameMutexId
 	fileNameMutexId++
