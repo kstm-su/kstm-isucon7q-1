@@ -139,7 +139,7 @@ type IMessage struct {
 
 func queryMessages(chanID, lastID int64) ([]IMessage, error) {
 	msgs := []IMessage{}
-	err := db.Select(&msgs, "SELECT m.*, name, display_name, avatar_icon FROM (SELECT * FROM message WHERE id > ? AND channel_id = ? ORDER BY id DESC LIMIT 100) as m INNER JOIN user ON user.id = m.user_id ORDER BY m.id",
+	err := db.Select(&msgs, "SELECT m.*, name, display_name, avatar_icon FROM (SELECT * FROM message WHERE id > ? AND channel_id = ? ORDER BY id DESC LIMIT 100) as m INNER JOIN user ON user.id = m.user_id ORDER BY m.id DESC",
 		lastID, chanID)
 	return msgs, err
 }
