@@ -19,5 +19,10 @@ build:
 	sudo systemctl stop isubata.golang.service
 	go build -v isubata
 
+.PHONY: test
+test:
+	go fmt ./src/isubata/app.go
+	go test -v isubata
+
 vet:
 	go vet ./src/isubata/...
