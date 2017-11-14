@@ -645,7 +645,7 @@ var (
 	fileNameMutex sync.Mutex
 	fileNameMutexId = 1
 )
-func fileName():string{
+func fileName()string{
 	fileNameMutex.Lock()
 	var ret = fileNameMutexId
 	fileNameMutexId++
