@@ -79,3 +79,7 @@ name = "GET /js"
 [[bundle]]
 regexp = '^GET /css/.*'
 name = "GET /css"
+
+[[bundle]]
+regex = '^GET /fetch/.*'
+name = "GET /fetch"
