@@ -1,8 +1,9 @@
 package main
 
 import (
-	"time"
+	"sort"
 	"sync"
+	"time"
 )
 
 type User struct {
@@ -26,6 +27,23 @@ type Channel struct {
 	Messages []*Message      `json:"-"`
 }
 
+func (c *Channel) AddMessage(m *Message) {
+	c.Messages = append(c.Messages, m)
+	sort.Slice(c.Messages, func(i, j int) bool {
+		return c.Messages[i].CreatedAt.Before(c.Messages[j].CreatedAt)
+	})
+}
+
+func (c *Channel) GetMessagesAfter(id int64) []*Message {
+	res := make([]*Message, 0)
+	for _, m := range c.Messages {
+		if m.ID > id {
+			res = append(res, m)
+		}
+	}
+	return res
+}
+
 type Message struct {
 	ID        int64     `db:"id"`
 	ChannelID int64     `db:"channel_id"`
@@ -36,8 +54,16 @@ type Message struct {
 	User *User
 }
 
+type Channels struct {
+	sync.Map
+}
+
+type Messages struct {
+	sync.Map
+}
+
 type Dump struct {
 	Users    map[int64]*User    `json:"users"`
 	Channels map[int64]*Channel `json:"channels"`
-	Messages map[int64]*Message `json:"messages"`
+	Messages `json:"messages"`
 }

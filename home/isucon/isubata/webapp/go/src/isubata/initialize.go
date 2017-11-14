@@ -33,7 +33,7 @@ func syncInitialize(c echo.Context) error {
 func resetRedis() error {
 	users = make(map[int64]*User)
 	channels = make(map[int64]*Channel)
-	messages = make(map[int64]*Message)
+	messages = Messages{}
 
 	if err := initializeUsers(); err != nil {
 		return err
@@ -91,7 +91,8 @@ func initializeMessages() error {
 			return err
 		}
 		m.User = users[m.UserID]
-		messages[m.ID] = &m
+		//messages[m.ID] = &m
+		messages.Store(m.ID, &m)
 		channels[m.ChannelID].HaveRead = make(map[int64]int64)
 		channels[m.ChannelID].Messages = append(channels[m.ChannelID].Messages, &m)
 	}

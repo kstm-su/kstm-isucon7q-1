@@ -1,7 +1,6 @@
 package main
 
 import (
-	"sort"
 	"strconv"
 
 	"github.com/labstack/echo"
@@ -21,11 +20,8 @@ func syncMessage(c echo.Context) (err error) {
 	if err = c.Bind(&m); err != nil {
 		return
 	}
-	messages[m.ID] = &m
-	channels[m.ChannelID].Messages = append(channels[m.ChannelID].Messages, &m)
-	sort.Slice(channels[m.ChannelID].Messages, func(i, j int) bool {
-		return channels[m.ChannelID].Messages[i].CreatedAt.Before(channels[m.ChannelID].Messages[j].CreatedAt)
-	})
+	messages.Store(m.ID, &m)
+	channels[m.ChannelID].AddMessage(&m)
 	return
 }
 

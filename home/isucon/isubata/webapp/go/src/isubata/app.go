@@ -4,7 +4,6 @@ import (
 	crand "crypto/rand"
 	"crypto/sha1"
 	"encoding/binary"
-	"sync"
 	"fmt"
 	"html/template"
 	"io"
@@ -13,7 +12,6 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -44,7 +42,7 @@ var (
 
 	users    map[int64]*User
 	channels map[int64]*Channel
-	messages map[int64]*Message
+	messages Messages
 )
 
 func min(a, b int64) int64 {
@@ -70,7 +68,7 @@ func init() {
 
 	users = make(map[int64]*User)
 	channels = make(map[int64]*Channel)
-	messages = make(map[int64]*Message)
+	messages = Messages{}
 
 	db_host := os.Getenv("ISUBATA_DB_HOST")
 	if db_host == "" {
@@ -129,11 +127,9 @@ func addMessage(channelID, userID int64, content string) (int64, error) {
 		CreatedAt: time.Now(),
 		User:      users[userID],
 	}
-	messages[id] = m
-	channels[channelID].Messages = append(channels[channelID].Messages, m)
-	sort.Slice(channels[m.ChannelID].Messages, func(i, j int) bool {
-		return channels[m.ChannelID].Messages[i].CreatedAt.Before(channels[m.ChannelID].Messages[j].CreatedAt)
-	})
+	messages.Store(id, m)
+	channels[channelID].AddMessage(m)
+	gorequest.New().Post("http://" + other + "/sync/message").Send(m).End()
 	return id, nil
 }
 
@@ -150,17 +146,11 @@ type IMessage struct {
 }
 
 func queryMessages(chanID, lastID int64) []*Message {
-	msgs := make([]*Message, 0, 100)
-	for i := len(channels[chanID].Messages) - 1; i > 0; i-- {
-		m := channels[chanID].Messages[i]
-		if m.ID > lastID {
-			msgs = append(msgs, m)
-		}
-		if len(msgs) >= 100 {
-			break
-		}
+	m := channels[chanID].GetMessagesAfter(lastID)
+	if len(m) > 100 {
+		m = m[len(m)-100:]
 	}
-	return msgs
+	return m
 }
 
 func sessUserID(c echo.Context) int64 {
@@ -355,17 +345,13 @@ func postMessage(c echo.Context) error {
 		chanID = int64(x)
 	}
 
-	id, err := addMessage(chanID, user.ID, message)
+	_, err = addMessage(chanID, user.ID, message)
 	if err != nil {
 		return err
 	}
-	_, _, errs := gorequest.New().Post("http://" + other + "/sync/message").Send(messages[id]).End()
-	if errs != nil {
-		return errs[0]
-	}
-
 	return c.NoContent(204)
 }
+
 func jsonifyMessage(m *Message) (map[string]interface{}, error) {
 	u, ok := users[m.UserID]
 	if !ok {
@@ -374,7 +360,15 @@ func jsonifyMessage(m *Message) (map[string]interface{}, error) {
 
 	r := make(map[string]interface{})
 	r["id"] = m.ID
-	r["user"] = u
+	r["user"] = struct {
+		AvatarIcon  string `json:"avatar_icon"`
+		DisplayName string `json:"display_name"`
+		Name        string `json:"name"`
+	}{
+		AvatarIcon:  u.AvatarIcon,
+		DisplayName: u.DisplayName,
+		Name:        u.Name,
+	}
 	r["date"] = m.CreatedAt.Format("2006/01/02 15:04:05")
 	r["content"] = m.Content
 	return r, nil
@@ -395,11 +389,12 @@ func getMessage(c echo.Context) error {
 		return err
 	}
 
-	messages := queryMessages(chanID, lastID)
+	ms := queryMessages(chanID, lastID)
 
 	response := make([]map[string]interface{}, 0)
-	for i := len(messages) - 1; i >= 0; i-- {
-		m := messages[i]
+	//for i := len(messages) - 1; i >= 0; i-- {
+	for i, m := range ms {
+		//m := messages[i]
 		if m == nil {
 			fmt.Printf("nil message: %d", i)
 			continue
@@ -411,9 +406,9 @@ func getMessage(c echo.Context) error {
 		response = append(response, r)
 	}
 
-	if len(messages) > 0 {
-		channels[chanID].HaveRead[userID] = messages[0].ID
-		gorequest.New().Get(fmt.Sprintf("http://%s/sync/haveread/%d/%d/%d", other, chanID, userID, messages[0].ID)).End()
+	if len(ms) > 0 {
+		channels[chanID].HaveRead[userID] = ms[len(ms)-1].ID
+		gorequest.New().Get(fmt.Sprintf("http://%s/sync/haveread/%d/%d/%d", other, chanID, userID, ms[len(ms)-1].ID)).End()
 	}
 
 	return c.JSON(http.StatusOK, response)
@@ -427,11 +422,6 @@ func queryChannels() ([]int64, error) {
 	return res, nil
 }
 
-func queryHaveRead(userID, chID int64) (int64, error) {
-	h, _ := channels[chID].HaveRead[userID]
-	return h, nil
-}
-
 func fetchUnread(c echo.Context) error {
 	userID := sessUserID(c)
 	if userID == 0 {
@@ -442,21 +432,24 @@ func fetchUnread(c echo.Context) error {
 
 	resp := []map[string]interface{}{}
 
-	for chID, _ := range channels {
-		lastID, err := queryHaveRead(userID, chID)
-		if err != nil {
-			return err
+	for chID, ch := range channels {
+		if chID < 11 {
+			continue
 		}
+		lastID, _ := ch.HaveRead[userID]
 
 		var cnt int64 = 0
-		for _, m := range channels[chID].Messages {
+		for _, m := range ch.Messages {
 			if m.ID > lastID {
 				cnt++
 			}
 		}
 		r := map[string]interface{}{
 			"channel_id": chID,
-			"unread":     cnt}
+			"unread":     cnt,
+			"haveread":   ch.HaveRead,
+			"messages":   ch.Messages,
+		}
 		resp = append(resp, r)
 	}
 
