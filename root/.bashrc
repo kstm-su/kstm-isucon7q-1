@@ -100,7 +100,7 @@ fi
 
 alias kataribe='/opt/kataribe -conf /opt/kataribe.toml'
 
-lotate() {
+rotate() {
   > /var/log/nginx/access.log
   > /var/log/nginx/error.log
 }
