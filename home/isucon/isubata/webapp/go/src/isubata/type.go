@@ -33,6 +33,7 @@ func (c *Channel) AddMessage(m *Message) {
 	c.m.Lock()
 	c.Messages = append(c.Messages, m)
 	sort.Slice(c.Messages, func(i, j int) bool {
+		return c.Messages[i].ID < c.Messages[j].ID
 		return c.Messages[i].CreatedAt.Before(c.Messages[j].CreatedAt)
 	})
 	c.m.Unlock()
