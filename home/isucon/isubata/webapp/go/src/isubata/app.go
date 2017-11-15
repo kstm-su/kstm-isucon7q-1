@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	crand "crypto/rand"
 	"crypto/sha1"
 	"encoding/binary"
@@ -14,6 +16,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-redis/redis"
@@ -24,10 +27,6 @@ import (
 	"github.com/labstack/echo-contrib/session"
 	"github.com/labstack/echo/middleware"
 	"github.com/parnurzeal/gorequest"
-
-	"bytes"
-	"compress/gzip"
-	"sync"
 )
 
 const (
@@ -41,7 +40,7 @@ var (
 	other         string
 
 	users    map[int64]*User
-	channels map[int64]*Channel
+	channels Channels
 	messages Messages
 )
 
@@ -67,7 +66,7 @@ func init() {
 	other = os.Getenv("ISUBATA_OTHER_HOST")
 
 	users = make(map[int64]*User)
-	channels = make(map[int64]*Channel)
+	channels = Channels{}
 	messages = Messages{}
 
 	db_host := os.Getenv("ISUBATA_DB_HOST")
@@ -128,8 +127,8 @@ func addMessage(channelID, userID int64, content string) (int64, error) {
 		User:      users[userID],
 	}
 	messages.Store(id, m)
-	channels[channelID].AddMessage(m)
-	gorequest.New().Post("http://" + other + "/sync/message").Send(m).End()
+	channels.Load(channelID).AddMessage(m)
+	go gorequest.New().Post("http://" + other + "/sync/message").Send(m).End()
 	return id, nil
 }
 
@@ -146,7 +145,7 @@ type IMessage struct {
 }
 
 func queryMessages(chanID, lastID int64) []*Message {
-	m := channels[chanID].GetMessagesAfter(lastID)
+	m := channels.Load(chanID).GetMessagesAfter(lastID)
 	if len(m) > 100 {
 		m = m[len(m)-100:]
 	}
@@ -252,10 +251,10 @@ func getChannel(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	ch := channels[int64(cID)]
+	ch := channels.Load(int64(cID))
 	return c.Render(http.StatusOK, "channel", map[string]interface{}{
 		"ChannelID":   cID,
-		"Channels":    channels,
+		"Channels":    channels.Slice(),
 		"User":        user,
 		"Description": ch.Description,
 	})
@@ -407,7 +406,7 @@ func getMessage(c echo.Context) error {
 	}
 
 	if len(ms) > 0 {
-		channels[chanID].HaveRead[userID] = ms[len(ms)-1].ID
+		channels.Load(chanID).UpdateHaveRead(userID, ms[len(ms)-1].ID)
 		gorequest.New().Get(fmt.Sprintf("http://%s/sync/haveread/%d/%d/%d", other, chanID, userID, ms[len(ms)-1].ID)).End()
 	}
 
@@ -415,10 +414,11 @@ func getMessage(c echo.Context) error {
 }
 
 func queryChannels() ([]int64, error) {
-	res := make([]int64, 0, len(channels))
-	for id, _ := range channels {
+	res := make([]int64, 0)
+	channels.Range(func(id int64, _ *Channel) bool {
 		res = append(res, id)
-	}
+		return true
+	})
 	return res, nil
 }
 
@@ -428,30 +428,27 @@ func fetchUnread(c echo.Context) error {
 		return c.NoContent(http.StatusForbidden)
 	}
 
-	time.Sleep(time.Millisecond * 3000)
+	time.Sleep(time.Millisecond * 5000)
 
 	resp := []map[string]interface{}{}
 
-	for chID, ch := range channels {
-		if chID < 11 {
-			continue
-		}
-		lastID, _ := ch.HaveRead[userID]
-
-		var cnt int64 = 0
+	channels.Range(func(chID int64, ch *Channel) bool {
+		lastID := ch.GetHaveRead(userID)
+		var cnt int64
+		ch.m.RLock()
 		for _, m := range ch.Messages {
 			if m.ID > lastID {
 				cnt++
 			}
 		}
+		ch.m.RUnlock()
 		r := map[string]interface{}{
 			"channel_id": chID,
 			"unread":     cnt,
-			"haveread":   ch.HaveRead,
-			"messages":   ch.Messages,
 		}
 		resp = append(resp, r)
-	}
+		return true
+	})
 
 	return c.JSON(http.StatusOK, resp)
 }
@@ -479,12 +476,11 @@ func getHistory(c echo.Context) error {
 	}
 
 	const N = 20
-	cnt := int64(len(channels[int64(chID)].Messages))
-	//var cnt int64
-	//err = db.Get(&cnt, "SELECT COUNT(1) as cnt FROM message WHERE channel_id = ?", chID)
-	//if err != nil {
-	//	return err
-	//}
+	ch := channels.Load(int64(chID))
+	ch.m.RLock()
+	ms := ch.Messages[:]
+	ch.m.RUnlock()
+	cnt := int64(len(ms))
 	maxPage := int64(cnt+N-1) / N
 	if maxPage == 0 {
 		maxPage = 1
@@ -493,23 +489,17 @@ func getHistory(c echo.Context) error {
 		return ErrBadReqeust
 	}
 
-	rev := make([]*Message, len(channels[chID].Messages))
-	for i, m := range channels[chID].Messages {
-		rev[len(channels[chID].Messages)-i-1] = m
+	rev := make([]*Message, len(ms))
+	for i, m := range ms {
+		rev[len(ms)-i-1] = m
 	}
 	msgs := rev[:]
-	begin := min((page-1)*N, int64(len(channels[chID].Messages)))
-	end := min(page*N, int64(len(channels[chID].Messages)))
+	begin := min((page-1)*N, int64(len(ms)))
+	end := min(page*N, int64(len(ms)))
 	if end > 0 {
-		fmt.Println("page: ", len(channels[chID].Messages), begin, end)
+		fmt.Println("page: ", len(ms), begin, end)
 		msgs = rev[begin:end]
 	}
-	//err = db.Select(&msgs,
-	//	"SELECT * FROM message WHERE channel_id = ? ORDER BY id DESC LIMIT ? OFFSET ?",
-	//	chID, N, (page-1)*N)
-	//if len(msgs) == 0 {
-	//	return fmt.Errorf("no messages")
-	//}
 
 	mjson := make([]map[string]interface{}, 0)
 	for i := len(msgs) - 1; i >= 0; i-- {
@@ -522,7 +512,7 @@ func getHistory(c echo.Context) error {
 
 	return c.Render(http.StatusOK, "history", map[string]interface{}{
 		"ChannelID": chID,
-		"Channels":  channels,
+		"Channels":  channels.Slice(),
 		"Messages":  mjson,
 		"MaxPage":   maxPage,
 		"Page":      page,
@@ -560,7 +550,7 @@ func getProfile(c echo.Context) error {
 
 	return c.Render(http.StatusOK, "profile", map[string]interface{}{
 		"ChannelID":   0,
-		"Channels":    channels,
+		"Channels":    channels.Slice(),
 		"User":        self,
 		"Other":       other,
 		"SelfProfile": self.ID == other.ID,
@@ -581,7 +571,7 @@ func getAddChannel(c echo.Context) error {
 
 	return c.Render(http.StatusOK, "add_channel", map[string]interface{}{
 		"ChannelID": 0,
-		"Channels":  channels,
+		"Channels":  channels.Slice(),
 		"User":      self,
 	})
 }
@@ -612,10 +602,10 @@ func postAddChannel(c echo.Context) error {
 		Description: desc,
 		UpdatedAt:   now,
 		CreatedAt:   now,
-		HaveRead:    make(map[int64]int64),
+		HaveRead:    sync.Map{},
 		Messages:    make([]*Message, 0),
 	}
-	channels[lastID] = ch
+	channels.Store(lastID, ch)
 	gorequest.New().Post("http://" + other + "/sync/channel").Send(ch).End()
 	//lastID, _ := res.LastInsertId()
 	return c.Redirect(http.StatusSeeOther,

@@ -23,24 +23,42 @@ type Channel struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 	CreatedAt   time.Time `json:"created_at"`
 
-	HaveRead map[int64]int64 `json:"-"`
-	Messages []*Message      `json:"-"`
+	HaveRead sync.Map   `json:"-"`
+	Messages []*Message `json:"-"`
+
+	m sync.RWMutex
 }
 
 func (c *Channel) AddMessage(m *Message) {
+	c.m.Lock()
 	c.Messages = append(c.Messages, m)
 	sort.Slice(c.Messages, func(i, j int) bool {
 		return c.Messages[i].CreatedAt.Before(c.Messages[j].CreatedAt)
 	})
+	c.m.Unlock()
+}
+
+func (c *Channel) UpdateHaveRead(userID, messageID int64) {
+	c.HaveRead.Store(userID, messageID)
+}
+
+func (c *Channel) GetHaveRead(userID int64) int64 {
+	v, ok := c.HaveRead.Load(userID)
+	if !ok {
+		return 0
+	}
+	return v.(int64)
 }
 
 func (c *Channel) GetMessagesAfter(id int64) []*Message {
 	res := make([]*Message, 0)
+	c.m.RLock()
 	for _, m := range c.Messages {
 		if m.ID > id {
 			res = append(res, m)
 		}
 	}
+	c.m.RUnlock()
 	return res
 }
 
@@ -58,12 +76,38 @@ type Channels struct {
 	sync.Map
 }
 
+func (c *Channels) Load(id int64) *Channel {
+	v, ok := c.Map.Load(id)
+	if !ok {
+		return nil
+	}
+	res, _ := v.(*Channel)
+	return res
+}
+
+func (c *Channels) Range(f func(int64, *Channel) bool) {
+	c.Map.Range(func(k, v interface{}) bool {
+		id, _ := k.(int64)
+		ch, _ := v.(*Channel)
+		return f(id, ch)
+	})
+}
+
+func (c *Channels) Slice() []*Channel {
+	res := make([]*Channel, 0)
+	c.Range(func(_ int64, ch *Channel) bool {
+		res = append(res, ch)
+		return true
+	})
+	return res
+}
+
 type Messages struct {
 	sync.Map
 }
 
 type Dump struct {
-	Users    map[int64]*User    `json:"users"`
-	Channels map[int64]*Channel `json:"channels"`
+	Users    map[int64]*User `json:"users"`
+	Channels `json:"channels"`
 	Messages `json:"messages"`
 }

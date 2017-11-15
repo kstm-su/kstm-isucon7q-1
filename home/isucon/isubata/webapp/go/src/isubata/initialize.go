@@ -1,6 +1,8 @@
 package main
 
 import (
+	"sync"
+
 	"github.com/labstack/echo"
 	"github.com/parnurzeal/gorequest"
 )
@@ -32,7 +34,7 @@ func syncInitialize(c echo.Context) error {
 
 func resetRedis() error {
 	users = make(map[int64]*User)
-	channels = make(map[int64]*Channel)
+	channels = Channels{}
 	messages = Messages{}
 
 	if err := initializeUsers(); err != nil {
@@ -74,7 +76,7 @@ func initializeChannels() error {
 		if err := rows.Scan(&c.ID, &c.Name, &c.Description, &c.UpdatedAt, &c.CreatedAt); err != nil {
 			return err
 		}
-		channels[c.ID] = &c
+		channels.Store(c.ID, &c)
 	}
 	return nil
 }
@@ -91,10 +93,10 @@ func initializeMessages() error {
 			return err
 		}
 		m.User = users[m.UserID]
-		//messages[m.ID] = &m
 		messages.Store(m.ID, &m)
-		channels[m.ChannelID].HaveRead = make(map[int64]int64)
-		channels[m.ChannelID].Messages = append(channels[m.ChannelID].Messages, &m)
+		ch := channels.Load(m.ChannelID)
+		ch.HaveRead = sync.Map{}
+		ch.Messages = append(ch.Messages, &m)
 	}
 	return nil
 }
