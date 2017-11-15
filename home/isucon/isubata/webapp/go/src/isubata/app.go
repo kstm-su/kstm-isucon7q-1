@@ -128,7 +128,7 @@ func addMessage(channelID, userID int64, content string) (int64, error) {
 	}
 	messages.Store(id, m)
 	channels.Load(channelID).AddMessage(m)
-	go gorequest.New().Post("http://" + other + "/sync/message").Send(m).End()
+	gorequest.New().Post("http://" + other + "/sync/message").Send(m).End()
 	return id, nil
 }
 
@@ -428,7 +428,7 @@ func fetchUnread(c echo.Context) error {
 		return c.NoContent(http.StatusForbidden)
 	}
 
-	time.Sleep(time.Millisecond * 5000)
+	time.Sleep(time.Millisecond * 7000)
 
 	resp := []map[string]interface{}{}
 
