@@ -7,6 +7,9 @@ deploy: build
 	ssh root@app2 systemctl stop isubata.golang.service
 	scp ~/isubata/webapp/go/isubata app2:~/isubata/webapp/go/isubata
 	ssh root@app2 systemctl start isubata.golang.service
+	ssh root@app3 systemctl stop isubata.golang.service
+	scp ~/isubata/webapp/go/isubata app3:~/isubata/webapp/go/isubata
+	ssh root@app3 systemctl start isubata.golang.service
 
 .PHONY: commit
 commit: deploy

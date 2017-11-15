@@ -2,7 +2,6 @@ package main
 
 import (
 	"strconv"
-	"sync"
 
 	"github.com/labstack/echo"
 )
@@ -40,7 +39,7 @@ func syncAddChannel(c echo.Context) (err error) {
 	if err = c.Bind(&ch); err != nil {
 		return
 	}
-	ch.HaveRead = sync.Map{}
+	ch.HaveRead = HaveRead{}
 	ch.Messages = make([]*Message, 0)
 	channels.Store(ch.ID, &ch)
 	return

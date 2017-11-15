@@ -6,6 +6,7 @@ import (
 	crand "crypto/rand"
 	"crypto/sha1"
 	"encoding/binary"
+	"encoding/gob"
 	"fmt"
 	"html/template"
 	"io"
@@ -37,7 +38,8 @@ var (
 	db            *sqlx.DB
 	ErrBadReqeust = echo.NewHTTPError(http.StatusBadRequest)
 	redisClient   *redis.Client
-	other         string
+	other1        string
+	other2        string
 
 	users    map[int64]*User
 	channels Channels
@@ -63,7 +65,8 @@ func init() {
 	seedBuf := make([]byte, 8)
 	crand.Read(seedBuf)
 	rand.Seed(int64(binary.LittleEndian.Uint64(seedBuf)))
-	other = os.Getenv("ISUBATA_OTHER_HOST")
+	other1 = os.Getenv("ISUBATA_OTHER_HOST1")
+	other2 = os.Getenv("ISUBATA_OTHER_HOST2")
 
 	users = make(map[int64]*User)
 	channels = Channels{}
@@ -104,9 +107,76 @@ func init() {
 		Addr: "app3:6379",
 	})
 
+	ub, err := redisClient.Get("users").Bytes()
+	if err != nil {
+		log.Fatal("failed to restore users: ", err)
+	}
+	if err := gob.NewDecoder(bytes.NewBuffer(ub)).Decode(&users); err != nil {
+		log.Fatal("failed to decode users: ", err)
+	}
+	log.Println("restored users")
+
+	ch := make(map[int64]*Channel)
+	cb, err := redisClient.Get("channels").Bytes()
+	if err != nil {
+		log.Fatal("failed to restore channels: ", err)
+	}
+	if err := gob.NewDecoder(bytes.NewBuffer(cb)).Decode(&ch); err != nil {
+		log.Fatal("failed to decode channels: ", err)
+	}
+	for k, v := range ch {
+		channels.Store(k, v)
+	}
+	log.Println("restored channels")
+
+	mh := make(map[int64]*Message)
+	mb, err := redisClient.Get("messages").Bytes()
+	if err != nil {
+		log.Fatal("failed to restore messages: ", err)
+	}
+	if err := gob.NewDecoder(bytes.NewBuffer(mb)).Decode(&mh); err != nil {
+		log.Fatal("failed to decode messages: ", err)
+	}
+	for k, v := range mh {
+		messages.Store(k, v)
+	}
+	log.Println("restored messages")
+
 	db.SetMaxOpenConns(20)
-	db.SetConnMaxLifetime(5 * time.Minute)
+	db.SetConnMaxLifetime(10 * time.Minute)
 	log.Printf("Succeeded to connect db.")
+
+	if os.Getenv("ISUBATA_SERVER_ID") == "03" {
+		go func() {
+			for {
+				time.Sleep(time.Second * 180)
+
+				userBuf := bytes.Buffer{}
+				userEnc := gob.NewEncoder(&userBuf)
+				if err := userEnc.Encode(users); err != nil {
+					log.Fatal("failed to save user:", err)
+				}
+				redisClient.Set("users", userBuf.Bytes(), 0)
+				log.Println("saved user")
+
+				channelBuf := bytes.Buffer{}
+				channelEnc := gob.NewEncoder(&channelBuf)
+				if err := channelEnc.Encode(channels.Hash()); err != nil {
+					log.Fatal("failed to save channel:", err)
+				}
+				redisClient.Set("channels", channelBuf.Bytes(), 0)
+				log.Println("saved channel")
+
+				messageBuf := bytes.Buffer{}
+				messageEnc := gob.NewEncoder(&messageBuf)
+				if err := messageEnc.Encode(messages.Hash()); err != nil {
+					log.Fatal("failed to save message:", err)
+				}
+				redisClient.Set("messages", messageBuf.Bytes(), 0)
+				log.Println("saved message")
+			}
+		}()
+	}
 }
 
 func getUser(userID int64) (*User, error) {
@@ -128,7 +198,8 @@ func addMessage(channelID, userID int64, content string) (int64, error) {
 	}
 	messages.Store(id, m)
 	channels.Load(channelID).AddMessage(m)
-	gorequest.New().Post("http://" + other + "/sync/message").Send(m).End()
+	gorequest.New().Post("http://" + other1 + "/sync/message").Send(m).End()
+	gorequest.New().Post("http://" + other2 + "/sync/message").Send(m).End()
 	return id, nil
 }
 
@@ -280,7 +351,8 @@ func postRegister(c echo.Context) error {
 		}
 	}
 	userID, _ := register(name, pw)
-	gorequest.New().Post("http://" + other + "/sync/register").Send(users[userID]).End()
+	gorequest.New().Post("http://" + other1 + "/sync/register").Send(users[userID]).End()
+	gorequest.New().Post("http://" + other2 + "/sync/register").Send(users[userID]).End()
 	sessSetUserID(c, userID)
 	return c.Redirect(http.StatusSeeOther, "/")
 }
@@ -407,7 +479,8 @@ func getMessage(c echo.Context) error {
 
 	if len(ms) > 0 {
 		channels.Load(chanID).UpdateHaveRead(userID, ms[len(ms)-1].ID)
-		gorequest.New().Get(fmt.Sprintf("http://%s/sync/haveread/%d/%d/%d", other, chanID, userID, ms[len(ms)-1].ID)).End()
+		gorequest.New().Get(fmt.Sprintf("http://%s/sync/haveread/%d/%d/%d", other1, chanID, userID, ms[len(ms)-1].ID)).End()
+		gorequest.New().Get(fmt.Sprintf("http://%s/sync/haveread/%d/%d/%d", other2, chanID, userID, ms[len(ms)-1].ID)).End()
 	}
 
 	return c.JSON(http.StatusOK, response)
@@ -602,11 +675,12 @@ func postAddChannel(c echo.Context) error {
 		Description: desc,
 		UpdatedAt:   now,
 		CreatedAt:   now,
-		HaveRead:    sync.Map{},
+		HaveRead:    HaveRead{},
 		Messages:    make([]*Message, 0),
 	}
 	channels.Store(lastID, ch)
-	gorequest.New().Post("http://" + other + "/sync/channel").Send(ch).End()
+	gorequest.New().Post("http://" + other1 + "/sync/channel").Send(ch).End()
+	gorequest.New().Post("http://" + other2 + "/sync/channel").Send(ch).End()
 	//lastID, _ := res.LastInsertId()
 	return c.Redirect(http.StatusSeeOther,
 		fmt.Sprintf("/channel/%v", lastID))
@@ -696,7 +770,8 @@ func postProfile(c echo.Context) error {
 		users[self.ID].DisplayName = name
 	}
 
-	gorequest.New().Post("http://" + other + "/sync/profile").Send(users[self.ID]).End()
+	gorequest.New().Post("http://" + other1 + "/sync/profile").Send(users[self.ID]).End()
+	gorequest.New().Post("http://" + other2 + "/sync/profile").Send(users[self.ID]).End()
 
 	return c.Redirect(http.StatusSeeOther, "/")
 }

@@ -1,8 +1,6 @@
 package main
 
 import (
-	"sync"
-
 	"github.com/labstack/echo"
 	"github.com/parnurzeal/gorequest"
 )
@@ -19,7 +17,8 @@ func getInitialize(c echo.Context) error {
 	redisClient.Set("channel", 10, 0)
 	redisClient.Set("message", 10000, 0)
 
-	gorequest.New().Get("http://" + other + "/sync/initialize").End()
+	gorequest.New().Get("http://" + other1 + "/sync/initialize").End()
+	gorequest.New().Get("http://" + other2 + "/sync/initialize").End()
 	return syncInitialize(c)
 }
 
@@ -95,7 +94,7 @@ func initializeMessages() error {
 		m.User = users[m.UserID]
 		messages.Store(m.ID, &m)
 		ch := channels.Load(m.ChannelID)
-		ch.HaveRead = sync.Map{}
+		ch.HaveRead = HaveRead{}
 		ch.Messages = append(ch.Messages, &m)
 	}
 	return nil
